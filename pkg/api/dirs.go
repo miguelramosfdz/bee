@@ -6,7 +6,6 @@ package api
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,9 +17,9 @@ import (
 
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/logging"
-	"github.com/ethersphere/bee/pkg/manifest/jsonmanifest"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/manifest/mantaray"
 )
 
 const (
@@ -75,11 +74,18 @@ func validateRequest(r *http.Request) (context.Context, error) {
 // storeDir stores all files recursively contained in the directory given as a tar
 // it returns the hash for the uploaded manifest corresponding to the uploaded dir
 func storeDir(ctx context.Context, reader io.ReadCloser, s storage.Storer, logger logging.Logger) (swarm.Address, error) {
-	dirManifest := jsonmanifest.NewManifest()
+	v := ctx.Value(toEncryptContextKey{})
+	toEncrypt, _ := v.(bool) // default is false
+
+	ls := &manifestLoadSaver{s, toEncrypt}
+
+	dirManifest := mantaray.New()
 
 	// set up HTTP body reader
 	tarReader := tar.NewReader(reader)
 	defer reader.Close()
+
+	filesAdded := 0
 
 	// iterate through the files in the supplied tar
 	for {
@@ -114,40 +120,27 @@ func storeDir(ctx context.Context, reader io.ReadCloser, s storage.Storer, logge
 		}
 		logger.Tracef("uploaded dir file %v with reference %v", filePath, fileReference)
 
-		// create manifest entry for uploaded file
-		headers := http.Header{}
-		headers.Set("Content-Type", contentType)
-		fileEntry := jsonmanifest.NewEntry(fileReference, fileName, headers)
+		// add file entry to dir manifest
+		err = dirManifest.Add([]byte(filePath), fileReference.Bytes(), ls)
+		if err != nil {
+			return swarm.ZeroAddress, fmt.Errorf("add to manifest error: %w", err)
+		}
 
-		// add entry to dir manifest
-		dirManifest.Add(filePath, fileEntry)
+		filesAdded++
 	}
 
-	// check if files were uploaded by querying manifest length
-	if dirManifest.Length() == 0 {
-		return swarm.ZeroAddress, fmt.Errorf("no files added from tar")
+	// check if files were uploaded through the manifest
+	if filesAdded == 0 {
+		return swarm.ZeroAddress, fmt.Errorf("no files in tar")
 	}
 
-	// upload manifest
-	// first, serialize into byte array
-	b, err := dirManifest.MarshalBinary()
-	if err != nil {
-		return swarm.ZeroAddress, fmt.Errorf("manifest serialize error: %w", err)
-	}
-
-	// set up reader for manifest file upload
-	r := bytes.NewReader(b)
-
-	// then, upload manifest
-	manifestFileInfo := &fileUploadInfo{
-		size:        r.Size(),
-		contentType: ManifestContentType,
-		reader:      r,
-	}
-	manifestReference, err := storeFile(ctx, manifestFileInfo, s)
+	// save manifest
+	err := dirManifest.Save(ls)
 	if err != nil {
 		return swarm.ZeroAddress, fmt.Errorf("store manifest error: %w", err)
 	}
+
+	manifestReference := swarm.NewAddress(dirManifest.Reference())
 
 	return manifestReference, nil
 }

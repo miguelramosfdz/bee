@@ -7,6 +7,7 @@ package api_test
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"path"
@@ -16,18 +17,19 @@ import (
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/jsonhttp/jsonhttptest"
 	"github.com/ethersphere/bee/pkg/logging"
-	"github.com/ethersphere/bee/pkg/manifest/jsonmanifest"
 	"github.com/ethersphere/bee/pkg/storage/mock"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/tags"
+	"github.com/ethersphere/manifest/mantaray"
 )
 
 func TestDirs(t *testing.T) {
 	var (
 		dirUploadResource    = "/dirs"
 		fileDownloadResource = func(addr string) string { return "/files/" + addr }
+		storer               = mock.NewStorer()
 		client               = newTestServer(t, testServerOptions{
-			Storer: mock.NewStorer(),
+			Storer: storer,
 			Tags:   tags.NewTags(),
 			Logger: logging.New(ioutil.Discard, 5),
 		})
@@ -137,26 +139,54 @@ func TestDirs(t *testing.T) {
 			tarReader := tarFiles(t, tc.files)
 
 			// verify directory tar upload response
-			jsonhttptest.ResponseDirectSendHeadersAndReceiveHeaders(t, client, http.MethodPost, dirUploadResource, tarReader, http.StatusOK, api.FileUploadResponse{
-				Reference: swarm.MustParseHexAddress(tc.expectedHash),
-			}, http.Header{
+			_, respBytes := jsonhttptest.ResponseDirectSendHeadersAndDontCheckResponse(t, client, http.MethodPost, dirUploadResource, tarReader, http.StatusOK, http.Header{
 				"Content-Type": {api.ContentTypeTar},
 			})
+			read := bytes.NewReader(respBytes)
 
-			// create expected manifest
-			expectedManifest := jsonmanifest.NewManifest()
-			for _, file := range tc.files {
-				e := jsonmanifest.NewEntry(file.reference, file.name, file.header)
-				expectedManifest.Add(path.Join(file.dir, file.name), e)
-			}
-
-			b, err := expectedManifest.MarshalBinary()
+			// get the reference as everytime it will change because of random encryption key
+			var resp api.FileUploadResponse
+			err := json.NewDecoder(read).Decode(&resp)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			// verify directory upload manifest through files api
-			jsonhttptest.ResponseDirectCheckBinaryResponse(t, client, http.MethodGet, fileDownloadResource(tc.expectedHash), nil, http.StatusOK, b, nil)
+			ls := &api.ManifestLoadSaver{storer, false}
+
+			// verify manifest content
+			verifyManifest := mantaray.NewNodeRef(resp.Reference.Bytes())
+
+			// check if each file can be located and read
+			for _, file := range tc.files {
+				filePath := path.Join(file.dir, file.name)
+
+				entry, err := verifyManifest.Lookup([]byte(filePath), ls)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				fileReference := swarm.NewAddress(entry)
+
+				if !bytes.Equal(file.reference.Bytes(), fileReference.Bytes()) {
+					t.Fatalf("expected file reference to match %x, got %x", file.reference, fileReference)
+				}
+
+				fileRespHeaders, fileRespBytes := jsonhttptest.ResponseDirectSendHeadersAndDontCheckResponse(t, client, http.MethodGet, fileDownloadResource(fileReference.String()), nil, http.StatusOK, nil)
+				if !bytes.Equal(file.data, fileRespBytes) {
+					t.Fatalf("expected file data to match %x, got %x", file.data, fileRespBytes)
+				}
+
+				for k := range file.header {
+					v := file.header.Get(k)
+					if v != "" {
+						rhv := fileRespHeaders.Get(k)
+
+						if v != rhv {
+							t.Fatalf("expected file header to match %s, got %s", v, rhv)
+						}
+					}
+				}
+			}
 		})
 	}
 }
