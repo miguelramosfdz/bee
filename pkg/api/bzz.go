@@ -7,25 +7,19 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/gorilla/mux"
 
 	"github.com/ethersphere/bee/pkg/collection/entry"
 	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/file/joiner"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
-	"github.com/ethersphere/bee/pkg/manifest/jsonmanifest"
 	"github.com/ethersphere/bee/pkg/sctx"
 	"github.com/ethersphere/bee/pkg/swarm"
-)
-
-const (
-	// ManifestContentType represents content type used for noting that specific
-	// file should be processed as manifest
-	ManifestContentType = "application/bzz-manifest+json"
+	"github.com/ethersphere/manifest/mantaray"
+	"github.com/gorilla/mux"
 )
 
 func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +59,7 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// read metadata
+	// read manifest metadata
 	buf = bytes.NewBuffer(nil)
 	_, err = file.JoinReadAll(ctx, j, e.Metadata(), buf, toDecrypt)
 	if err != nil {
@@ -74,8 +68,8 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		jsonhttp.NotFound(w, nil)
 		return
 	}
-	metadata := &entry.Metadata{}
-	err = json.Unmarshal(buf.Bytes(), metadata)
+	manifestMetadata := &entry.Metadata{}
+	err = json.Unmarshal(buf.Bytes(), manifestMetadata)
 	if err != nil {
 		s.Logger.Debugf("bzz download: unmarshal metadata %s: %v", address, err)
 		s.Logger.Errorf("bzz download: unmarshal metadata %s", address)
@@ -84,7 +78,7 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// we are expecting manifest Mime type here
-	if ManifestContentType != metadata.MimeType {
+	if ManifestBinaryContentType != manifestMetadata.MimeType {
 		s.Logger.Debugf("bzz download: not manifest %s: %v", address, err)
 		s.Logger.Error("bzz download: not manifest")
 		jsonhttp.BadRequest(w, "not manifest")
@@ -100,38 +94,22 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		jsonhttp.NotFound(w, nil)
 		return
 	}
-	manifest := jsonmanifest.NewManifest()
-	err = manifest.UnmarshalBinary(buf.Bytes())
-	if err != nil {
-		s.Logger.Debugf("bzz download: unmarshal manifest %s: %v", address, err)
-		s.Logger.Errorf("bzz download: unmarshal manifest %s", address)
-		jsonhttp.InternalServerError(w, "error unmarshaling manifest")
-		return
-	}
 
-	me, err := manifest.Entry(path)
+	manifest := mantaray.NewNodeRef(e.Reference().Bytes())
+
+	me, err := manifest.Lookup([]byte(path), &manifestLoadSaver{s.Storer, toDecrypt})
 	if err != nil {
 		s.Logger.Debugf("bzz download: invalid path %s/%s: %v", address, path, err)
 		s.Logger.Error("bzz download: invalid path")
-		jsonhttp.BadRequest(w, "invalid path address")
+		if errors.Is(err, mantaray.ErrNotFound) {
+			jsonhttp.NotFound(w, "path address not found")
+		} else {
+			jsonhttp.BadRequest(w, "invalid path address")
+		}
 		return
 	}
 
-	manifestEntryAddress := me.Reference()
-
-	var additionalHeaders http.Header
-
-	// copy header from manifest
-	if me.Header() != nil {
-		additionalHeaders = me.Header().Clone()
-	} else {
-		additionalHeaders = http.Header{}
-	}
-
-	// include filename
-	if me.Name() != "" {
-		additionalHeaders.Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", me.Name()))
-	}
+	manifestEntryAddress := swarm.NewAddress(me)
 
 	// read file entry
 	buf = bytes.NewBuffer(nil)
@@ -149,6 +127,29 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		s.Logger.Errorf("bzz download: unmarshal file entry %s", address)
 		jsonhttp.InternalServerError(w, "error unmarshaling file entry")
 		return
+	}
+
+	// read file metadata
+	buf = bytes.NewBuffer(nil)
+	_, err = file.JoinReadAll(ctx, j, fe.Metadata(), buf, toDecrypt)
+	if err != nil {
+		s.Logger.Debugf("bzz download: read file metadata %s: %v", address, err)
+		s.Logger.Errorf("bzz download: read file metadata %s", address)
+		jsonhttp.NotFound(w, nil)
+		return
+	}
+	fileMetadata := &entry.Metadata{}
+	err = json.Unmarshal(buf.Bytes(), fileMetadata)
+	if err != nil {
+		s.Logger.Debugf("bzz download: unmarshal metadata %s: %v", address, err)
+		s.Logger.Errorf("bzz download: unmarshal metadata %s", address)
+		jsonhttp.InternalServerError(w, "error unmarshaling metadata")
+		return
+	}
+
+	additionalHeaders := http.Header{
+		"Content-Disposition": {fmt.Sprintf("inline; filename=\"%s\"", fileMetadata.Filename)},
+		"Content-Type":        {fileMetadata.MimeType},
 	}
 
 	fileEntryAddress := fe.Reference()

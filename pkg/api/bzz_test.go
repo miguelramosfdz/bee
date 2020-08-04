@@ -22,10 +22,10 @@ import (
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/jsonhttp/jsonhttptest"
 	"github.com/ethersphere/bee/pkg/logging"
-	"github.com/ethersphere/bee/pkg/manifest/jsonmanifest"
 	smock "github.com/ethersphere/bee/pkg/storage/mock"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/tags"
+	"github.com/ethersphere/manifest/mantaray"
 )
 
 func TestBzz(t *testing.T) {
@@ -33,6 +33,7 @@ func TestBzz(t *testing.T) {
 		bzzDownloadResource = func(addr, path string) string { return "/bzz/" + addr + "/" + path }
 		storer              = smock.NewStorer()
 		sp                  = splitter.NewSimpleSplitter(storer)
+		ls                  = &api.ManifestLoadSaver{storer, false}
 		client              = newTestServer(t, testServerOptions{
 			Storer: storer,
 			Tags:   tags.NewTags(),
@@ -68,6 +69,7 @@ func TestBzz(t *testing.T) {
 		}
 
 		fileMetadata := entry.NewMetadata(fileName)
+		fileMetadata.MimeType = "text/html; charset=utf-8"
 		fileMetadataBytes, err := json.Marshal(fileMetadata)
 		if err != nil {
 			t.Fatal(err)
@@ -90,23 +92,22 @@ func TestBzz(t *testing.T) {
 
 		// save manifest
 
-		jsonManifest := jsonmanifest.NewManifest()
+		manifest := mantaray.New()
 
-		e := jsonmanifest.NewEntry(fileReference, fileName, http.Header{"Content-Type": {"text/html", "charset=utf-8"}})
-		jsonManifest.Add(filePath, e)
-
-		manifestFileBytes, err := jsonManifest.MarshalBinary()
+		err = manifest.Add([]byte(filePath), fileReference.Bytes(), ls)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		fr, err := file.SplitWriteAll(context.Background(), sp, bytes.NewReader(manifestFileBytes), int64(len(manifestFileBytes)), false)
+		err = manifest.Save(ls)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		fr := swarm.NewAddress(manifest.Reference())
 
 		m := entry.NewMetadata(fileName)
-		m.MimeType = api.ManifestContentType
+		m.MimeType = api.ManifestBinaryContentType
 		metadataBytes, err := json.Marshal(m)
 		if err != nil {
 			t.Fatal(err)
@@ -149,9 +150,9 @@ func TestBzz(t *testing.T) {
 
 		// check on invalid path
 
-		jsonhttptest.ResponseDirectSendHeadersAndReceiveHeaders(t, client, http.MethodGet, bzzDownloadResource(manifestFileReference.String(), missingFilePath), nil, http.StatusBadRequest, jsonhttp.StatusResponse{
-			Message: "invalid path address",
-			Code:    http.StatusBadRequest,
+		jsonhttptest.ResponseDirectSendHeadersAndReceiveHeaders(t, client, http.MethodGet, bzzDownloadResource(manifestFileReference.String(), missingFilePath), nil, http.StatusNotFound, jsonhttp.StatusResponse{
+			Message: "path address not found",
+			Code:    http.StatusNotFound,
 		}, nil)
 
 	})
