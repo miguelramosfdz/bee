@@ -285,7 +285,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 			return nil, err
 		}
 	} else {
-		logger.Info("loaded saved tags successfully from state store")
+		logger.Info("successfully loaded tags from state store")
 	}
 
 	if err = p2ps.AddProtocol(retrieve.Protocol()); err != nil {
@@ -482,10 +482,11 @@ func (b *Bee) Shutdown(ctx context.Context) error {
 	if err := b.tracerCloser.Close(); err != nil {
 		errs.add(fmt.Errorf("tracer: %w", err))
 	}
+
 	if b.tags != nil {
-		err := b.stateStore.Put("tags", s.tags)
+		err := b.stateStore.Put("tags", b.tags)
 		if err != nil {
-			log.Error("had an error persisting tags", "err", err)
+			errs.add(fmt.Errorf("tag persistence:%w", "err", err))
 		}
 	}
 
