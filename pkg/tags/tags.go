@@ -125,6 +125,7 @@ func (ts *Tags) MarshalJSON() (out []byte, err error) {
 	ts.Range(func(k, v interface{}) bool {
 		key := fmt.Sprintf("%d", k)
 		val := v.(*Tag)
+		m[key] = val
 
 		return true
 	})
