@@ -59,7 +59,8 @@ type Bee struct {
 	debugAPIServer   *http.Server
 	errorLogWriter   *io.PipeWriter
 	tracerCloser     io.Closer
-	stateStoreCloser io.Closer
+	tags             *tag.Tags
+	stateStore       storage.StateStorer
 	localstoreCloser io.Closer
 	topologyCloser   io.Closer
 	pusherCloser     io.Closer
@@ -274,7 +275,18 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 		Pricer:      accounting.NewFixedPricer(address, 10),
 		Validator:   chunkvalidator,
 	})
+
 	tagg := tags.NewTags()
+	err = stateStore.Get("tags", tagg)
+	if err != nil {
+		if err == state.ErrNotFound {
+			tagg = tags.NewTags()
+		} else {
+			return nil, err
+		}
+	} else {
+		logger.Info("loaded saved tags successfully from state store")
+	}
 
 	if err = p2ps.AddProtocol(retrieve.Protocol()); err != nil {
 		return nil, fmt.Errorf("retrieval service: %w", err)
@@ -469,6 +481,12 @@ func (b *Bee) Shutdown(ctx context.Context) error {
 
 	if err := b.tracerCloser.Close(); err != nil {
 		errs.add(fmt.Errorf("tracer: %w", err))
+	}
+	if b.tags != nil {
+		err := b.stateStore.Put("tags", s.tags)
+		if err != nil {
+			log.Error("had an error persisting tags", "err", err)
+		}
 	}
 
 	if err := b.stateStoreCloser.Close(); err != nil {
