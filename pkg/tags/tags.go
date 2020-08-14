@@ -126,10 +126,6 @@ func (ts *Tags) MarshalJSON() (out []byte, err error) {
 		key := fmt.Sprintf("%d", k)
 		val := v.(*Tag)
 
-		// don't persist tags which were already done
-		if !val.Done(StateSynced) {
-			m[key] = val
-		}
 		return true
 	})
 	return json.Marshal(m)

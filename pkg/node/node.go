@@ -6,6 +6,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -59,7 +60,7 @@ type Bee struct {
 	debugAPIServer   *http.Server
 	errorLogWriter   *io.PipeWriter
 	tracerCloser     io.Closer
-	tags             *tag.Tags
+	tags             *tags.Tags
 	stateStore       storage.StateStorer
 	localstoreCloser io.Closer
 	topologyCloser   io.Closer
@@ -152,7 +153,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 			return nil, fmt.Errorf("statestore: %w", err)
 		}
 	}
-	b.stateStoreCloser = stateStore
+	b.stateStore = stateStore
 	addressbook := addressbook.New(stateStore)
 	signer := crypto.NewDefaultSigner(swarmPrivateKey)
 
@@ -276,11 +277,11 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 		Validator:   chunkvalidator,
 	})
 
-	tagg := tags.NewTags()
-	err = stateStore.Get("tags", tagg)
+	b.tags = tags.NewTags()
+	err = stateStore.Get("tags", b.tags)
 	if err != nil {
-		if err == state.ErrNotFound {
-			tagg = tags.NewTags()
+		if errors.Is(err, storage.ErrNotFound) {
+			b.tags = tags.NewTags()
 		} else {
 			return nil, err
 		}
@@ -310,7 +311,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 		Storer:           storer,
 		ClosestPeerer:    kad,
 		DeliveryCallback: psss.TryUnwrap,
-		Tagger:           tagg,
+		Tagger:           b.tags,
 		Logger:           logger,
 	})
 
@@ -331,7 +332,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 		Storer:        storer,
 		PeerSuggester: kad,
 		PushSyncer:    pushSyncProtocol,
-		Tagger:        tagg,
+		Tagger:        b.tags,
 		Logger:        logger,
 	})
 	b.pusherCloser = pushSyncPusher
@@ -361,7 +362,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 	var apiService api.Service
 	if o.APIAddr != "" {
 		// API server
-		apiService = api.New(tagg, ns, o.CORSAllowedOrigins, logger, tracer)
+		apiService = api.New(b.tags, ns, o.CORSAllowedOrigins, logger, tracer)
 		apiListener, err := net.Listen("tcp", o.APIAddr)
 		if err != nil {
 			return nil, fmt.Errorf("api listener: %w", err)
@@ -394,7 +395,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 			Tracer:         tracer,
 			TopologyDriver: kad,
 			Storer:         storer,
-			Tags:           tagg,
+			Tags:           b.tags,
 			Accounting:     acc,
 		})
 		// register metrics from components
@@ -483,14 +484,12 @@ func (b *Bee) Shutdown(ctx context.Context) error {
 		errs.add(fmt.Errorf("tracer: %w", err))
 	}
 
-	if b.tags != nil {
-		err := b.stateStore.Put("tags", b.tags)
-		if err != nil {
-			errs.add(fmt.Errorf("tag persistence:%w", "err", err))
-		}
+	err := b.stateStore.Put("tags", b.tags)
+	if err != nil {
+		errs.add(fmt.Errorf("tag persistence:%w", "err", err))
 	}
 
-	if err := b.stateStoreCloser.Close(); err != nil {
+	if err := b.stateStore.Close(); err != nil {
 		errs.add(fmt.Errorf("statestore: %w", err))
 	}
 
