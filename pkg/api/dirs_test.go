@@ -7,6 +7,7 @@ package api_test
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
@@ -14,13 +15,16 @@ import (
 	"testing"
 
 	"github.com/ethersphere/bee/pkg/api"
+	"github.com/ethersphere/bee/pkg/collection/entry"
+	"github.com/ethersphere/bee/pkg/file"
+	"github.com/ethersphere/bee/pkg/file/joiner"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/jsonhttp/jsonhttptest"
 	"github.com/ethersphere/bee/pkg/logging"
+	"github.com/ethersphere/bee/pkg/manifest"
 	"github.com/ethersphere/bee/pkg/storage/mock"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/tags"
-	"github.com/ethersphere/manifest/mantaray"
 )
 
 func TestDirs(t *testing.T) {
@@ -151,21 +155,42 @@ func TestDirs(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ls := &api.ManifestLoadSaver{storer, false}
+			// read manifest metadata
+			j := joiner.NewSimpleJoiner(storer)
+
+			buf := bytes.NewBuffer(nil)
+			_, err = file.JoinReadAll(context.Background(), j, resp.Reference, buf, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := &entry.Entry{}
+			err = e.UnmarshalBinary(buf.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			// verify manifest content
-			verifyManifest := mantaray.NewNodeRef(resp.Reference.Bytes())
+			verifyManifest, err := manifest.NewManifestReference(
+				context.Background(),
+				manifest.DefaultManifestType,
+				e.Reference(),
+				false,
+				storer,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			// check if each file can be located and read
 			for _, file := range tc.files {
 				filePath := path.Join(file.dir, file.name)
 
-				entry, err := verifyManifest.Lookup([]byte(filePath), ls)
+				entry, err := verifyManifest.Lookup(filePath)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				fileReference := swarm.NewAddress(entry)
+				fileReference := entry.Reference()
 
 				if !bytes.Equal(file.reference.Bytes(), fileReference.Bytes()) {
 					t.Fatalf("expected file reference to match %x, got %x", file.reference, fileReference)

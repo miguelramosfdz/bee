@@ -16,9 +16,9 @@ import (
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/file/joiner"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
+	"github.com/ethersphere/bee/pkg/manifest"
 	"github.com/ethersphere/bee/pkg/sctx"
 	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/manifest/mantaray"
 	"github.com/gorilla/mux"
 )
 
@@ -78,30 +78,25 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// we are expecting manifest Mime type here
-	if ManifestBinaryContentType != manifestMetadata.MimeType {
+	m, err := manifest.NewManifestReference(
+		ctx,
+		manifestMetadata.MimeType,
+		e.Reference(),
+		toDecrypt,
+		s.Storer,
+	)
+	if err != nil {
 		s.Logger.Debugf("bzz download: not manifest %s: %v", address, err)
 		s.Logger.Error("bzz download: not manifest")
 		jsonhttp.BadRequest(w, "not manifest")
 		return
 	}
 
-	// read manifest content
-	buf = bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(ctx, j, e.Reference(), buf, toDecrypt)
-	if err != nil {
-		s.Logger.Debugf("bzz download: data join %s: %v", address, err)
-		s.Logger.Errorf("bzz download: data join %s", address)
-		jsonhttp.NotFound(w, nil)
-		return
-	}
-
-	manifest := mantaray.NewNodeRef(e.Reference().Bytes())
-
-	me, err := manifest.Lookup([]byte(path), &manifestLoadSaver{s.Storer, toDecrypt})
+	me, err := m.Lookup(path)
 	if err != nil {
 		s.Logger.Debugf("bzz download: invalid path %s/%s: %v", address, path, err)
 		s.Logger.Error("bzz download: invalid path")
-		if errors.Is(err, mantaray.ErrNotFound) {
+		if errors.Is(err, manifest.ErrNotFound) {
 			jsonhttp.NotFound(w, "path address not found")
 		} else {
 			jsonhttp.BadRequest(w, "invalid path address")
@@ -109,7 +104,7 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifestEntryAddress := swarm.NewAddress(me)
+	manifestEntryAddress := me.Reference()
 
 	// read file entry
 	buf = bytes.NewBuffer(nil)

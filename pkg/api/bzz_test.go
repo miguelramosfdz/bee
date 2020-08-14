@@ -15,17 +15,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethersphere/bee/pkg/api"
 	"github.com/ethersphere/bee/pkg/collection/entry"
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/file/splitter"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/jsonhttp/jsonhttptest"
 	"github.com/ethersphere/bee/pkg/logging"
+	"github.com/ethersphere/bee/pkg/manifest"
 	smock "github.com/ethersphere/bee/pkg/storage/mock"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/tags"
-	"github.com/ethersphere/manifest/mantaray"
 )
 
 func TestBzz(t *testing.T) {
@@ -33,7 +32,6 @@ func TestBzz(t *testing.T) {
 		bzzDownloadResource = func(addr, path string) string { return "/bzz/" + addr + "/" + path }
 		storer              = smock.NewStorer()
 		sp                  = splitter.NewSimpleSplitter(storer)
-		ls                  = &api.ManifestLoadSaver{storer, false}
 		client              = newTestServer(t, testServerOptions{
 			Storer: storer,
 			Tags:   tags.NewTags(),
@@ -92,23 +90,26 @@ func TestBzz(t *testing.T) {
 
 		// save manifest
 
-		manifest := mantaray.New()
-
-		err = manifest.Add([]byte(filePath), fileReference.Bytes(), ls)
+		m, err := manifest.NewDefaultManifest(context.Background(), false, storer)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		err = manifest.Save(ls)
+		e := manifest.NewEntry(fileReference)
+
+		err = m.Add(filePath, e)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		fr := swarm.NewAddress(manifest.Reference())
+		manifestBytesReference, err := m.Store()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		m := entry.NewMetadata(fileName)
-		m.MimeType = api.ManifestBinaryContentType
-		metadataBytes, err := json.Marshal(m)
+		metadata := entry.NewMetadata(manifestBytesReference.String())
+		metadata.MimeType = m.Type()
+		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +120,7 @@ func TestBzz(t *testing.T) {
 		}
 
 		// now join both references (mr,fr) to create an entry and store it.
-		newEntry := entry.New(fr, mr)
+		newEntry := entry.New(manifestBytesReference, mr)
 		manifestFileEntryBytes, err := newEntry.MarshalBinary()
 		if err != nil {
 			t.Fatal(err)
