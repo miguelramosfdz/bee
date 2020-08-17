@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethersphere/bee/pkg/logging"
 	"github.com/ethersphere/bee/pkg/p2p"
+	"github.com/ethersphere/bee/pkg/pricing"
 	"github.com/ethersphere/bee/pkg/settlement"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -55,6 +56,7 @@ type Options struct {
 	Logger           logging.Logger
 	Store            storage.StateStorer
 	Settlement       settlement.Interface
+	Pricing          pricing.Interface
 }
 
 // Accounting is the main implementation of the accounting interface
@@ -66,6 +68,7 @@ type Accounting struct {
 	paymentThreshold  uint64 // the payment threshold in BZZ we communicate to our peers
 	paymentTolerance  uint64 // the amount in BZZ we let peers exceed the payment threshold before disconnected
 	settlement        settlement.Interface
+	pricing           pricing.Interface
 	metrics           metrics
 }
 
@@ -91,6 +94,7 @@ func NewAccounting(o Options) (*Accounting, error) {
 		logger:           o.Logger,
 		store:            o.Store,
 		settlement:       o.Settlement,
+		pricing:          o.Pricing,
 		metrics:          newMetrics(),
 	}, nil
 }
@@ -368,4 +372,28 @@ func (a *Accounting) NotifyPayment(peer swarm.Address, amount uint64) error {
 	}
 
 	return nil
+}
+
+func (a *Accounting) NotifyPaymentThreshold(peer swarm.Address, paymentThreshold uint64) error {
+	accountingPeer, err := a.getAccountingPeer(peer)
+	if err != nil {
+		return err
+	}
+
+	accountingPeer.lock.Lock()
+	defer accountingPeer.lock.Unlock()
+
+	accountingPeer.paymentThreshold = paymentThreshold
+	return nil
+}
+
+func (a *Accounting) Connected(ctx context.Context, peer swarm.Address) error {
+	return a.pricing.AnnouncePaymentThreshold(ctx, peer, a.paymentThreshold)
+}
+
+func (a *Accounting) Disconnected(peer swarm.Address) {
+	a.accountingPeersMu.Lock()
+	defer a.accountingPeersMu.Unlock()
+
+	delete(a.accountingPeers, peer.String())
 }

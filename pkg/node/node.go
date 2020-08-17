@@ -257,12 +257,15 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 		PaymentThreshold: o.PaymentThreshold,
 		PaymentTolerance: o.PaymentTolerance,
 		Settlement:       settlement,
+		Pricing:          pricing,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("accounting: %w", err)
 	}
 
 	settlement.SetPaymentObserver(acc)
+	pricing.SetPaymentThresholdObserver(acc)
+	p2ps.AddNotifier(acc)
 
 	chunkvalidator := swarm.NewChunkValidator(soc.NewValidator(), content.NewValidator())
 
