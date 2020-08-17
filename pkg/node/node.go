@@ -31,6 +31,7 @@ import (
 	"github.com/ethersphere/bee/pkg/netstore"
 	"github.com/ethersphere/bee/pkg/p2p/libp2p"
 	"github.com/ethersphere/bee/pkg/pingpong"
+	"github.com/ethersphere/bee/pkg/pricing"
 	"github.com/ethersphere/bee/pkg/pss"
 	"github.com/ethersphere/bee/pkg/puller"
 	"github.com/ethersphere/bee/pkg/pullsync"
@@ -239,6 +240,15 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 
 	if err = p2ps.AddProtocol(settlement.Protocol()); err != nil {
 		return nil, fmt.Errorf("pseudosettle service: %w", err)
+	}
+
+	pricing := pricing.New(pricing.Options{
+		Streamer: p2ps,
+		Logger:   logger,
+	})
+
+	if err = p2ps.AddProtocol(pricing.Protocol()); err != nil {
+		return nil, fmt.Errorf("pricing service: %w", err)
 	}
 
 	acc, err := accounting.NewAccounting(accounting.Options{
