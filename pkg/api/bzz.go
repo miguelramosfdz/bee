@@ -13,9 +13,8 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/ethersphere/bee/pkg/collection/entry"
-	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file"
-	"github.com/ethersphere/bee/pkg/file/joiner"
+	"github.com/ethersphere/bee/pkg/file/seekjoiner"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/manifest/jsonmanifest"
 	"github.com/ethersphere/bee/pkg/sctx"
@@ -44,12 +43,10 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toDecrypt := len(address.Bytes()) == (swarm.HashSize + encryption.KeyLength)
-
 	// read manifest entry
-	j := joiner.NewSimpleJoiner(s.Storer)
+	j := seekjoiner.NewSimpleJoiner(s.Storer)
 	buf := bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(ctx, j, address, buf, toDecrypt)
+	_, err = file.JoinReadAll(ctx, j, address, buf)
 	if err != nil {
 		s.Logger.Debugf("bzz download: read entry %s: %v", address, err)
 		s.Logger.Errorf("bzz download: read entry %s", address)
@@ -67,7 +64,7 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// read metadata
 	buf = bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(ctx, j, e.Metadata(), buf, toDecrypt)
+	_, err = file.JoinReadAll(ctx, j, e.Metadata(), buf)
 	if err != nil {
 		s.Logger.Debugf("bzz download: read metadata %s: %v", address, err)
 		s.Logger.Errorf("bzz download: read metadata %s", address)
@@ -93,7 +90,7 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// read manifest content
 	buf = bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(ctx, j, e.Reference(), buf, toDecrypt)
+	_, err = file.JoinReadAll(ctx, j, e.Reference(), buf)
 	if err != nil {
 		s.Logger.Debugf("bzz download: data join %s: %v", address, err)
 		s.Logger.Errorf("bzz download: data join %s", address)
@@ -135,7 +132,7 @@ func (s *server) bzzDownloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// read file entry
 	buf = bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(ctx, j, manifestEntryAddress, buf, toDecrypt)
+	_, err = file.JoinReadAll(ctx, j, manifestEntryAddress, buf)
 	if err != nil {
 		s.Logger.Debugf("bzz download: read file entry %s: %v", address, err)
 		s.Logger.Errorf("bzz download: read file entry %s", address)

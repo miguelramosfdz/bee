@@ -21,18 +21,20 @@ type SimpleJoinerJob struct {
 	spanLength int64
 	off        int64
 	levels     int
+	refLength  int
 
 	ctx    context.Context
 	getter storage.Getter
 }
 
 // NewSimpleJoinerJob creates a new simpleJoinerJob.
-func NewSimpleJoinerJob(ctx context.Context, getter storage.Getter, rootChunk swarm.Chunk) *SimpleJoinerJob {
+func NewSimpleJoinerJob(ctx context.Context, getter storage.Getter, refLength int, rootChunk swarm.Chunk) *SimpleJoinerJob {
 	// spanLength is the overall  size of the entire data layer for this content addressed hash
 	spanLength := binary.LittleEndian.Uint64(rootChunk.Data()[:8])
 	levelCount := file.Levels(int64(spanLength), swarm.SectionSize, swarm.Branches)
 	j := &SimpleJoinerJob{
 		addr:       rootChunk.Address(),
+		refLength:  refLength,
 		ctx:        ctx,
 		getter:     getter,
 		spanLength: int64(spanLength),
@@ -79,8 +81,8 @@ func (j *SimpleJoinerJob) readAtOffset(b, data []byte, cur, subTrieSize, off int
 		return n, nil
 	}
 
-	for cursor := 0; cursor < len(data); cursor += swarm.SectionSize {
-		address := swarm.NewAddress(data[cursor : cursor+swarm.SectionSize])
+	for cursor := 0; cursor < len(data); cursor += j.refLength {
+		address := swarm.NewAddress(data[cursor : cursor+j.refLength])
 		ch, err := j.getter.Get(j.ctx, storage.ModeGetRequest, address)
 		if err != nil {
 			return 0, err

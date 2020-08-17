@@ -24,7 +24,10 @@ import (
 	"sync"
 )
 
-const KeyLength = 32
+const (
+	KeyLength     = 32
+	ReferenceSize = 64
+)
 
 type Key []byte
 

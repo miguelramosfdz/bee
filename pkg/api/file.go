@@ -21,9 +21,7 @@ import (
 	"time"
 
 	"github.com/ethersphere/bee/pkg/collection/entry"
-	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file"
-	"github.com/ethersphere/bee/pkg/file/joiner"
 	"github.com/ethersphere/bee/pkg/file/seekjoiner"
 	"github.com/ethersphere/bee/pkg/file/splitter"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
@@ -235,15 +233,13 @@ func (s *server) fileDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toDecrypt := len(address.Bytes()) == (swarm.HashSize + encryption.KeyLength)
-
 	targets := r.URL.Query().Get("targets")
 	sctx.SetTargets(r.Context(), targets)
 
 	// read entry.
-	j := joiner.NewSimpleJoiner(s.Storer)
+	j := seekjoiner.NewSimpleJoiner(s.Storer)
 	buf := bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(r.Context(), j, address, buf, toDecrypt)
+	_, err = file.JoinReadAll(r.Context(), j, address, buf)
 	if err != nil {
 		s.Logger.Debugf("file download: read entry %s: %v", addr, err)
 		s.Logger.Errorf("file download: read entry %s", addr)
@@ -271,7 +267,7 @@ func (s *server) fileDownloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Read metadata.
 	buf = bytes.NewBuffer(nil)
-	_, err = file.JoinReadAll(r.Context(), j, e.Metadata(), buf, toDecrypt)
+	_, err = file.JoinReadAll(r.Context(), j, e.Metadata(), buf)
 	if err != nil {
 		s.Logger.Debugf("file download: read metadata %s: %v", addr, err)
 		s.Logger.Errorf("file download: read metadata %s", addr)

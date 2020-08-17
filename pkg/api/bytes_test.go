@@ -67,9 +67,9 @@ func TestBytes(t *testing.T) {
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		jsonhttptest.ResponseDirect(t, client, http.MethodGet, resource+"/abcd", nil, http.StatusNotFound, jsonhttp.StatusResponse{
-			Message: "not found",
-			Code:    http.StatusNotFound,
+		jsonhttptest.ResponseDirect(t, client, http.MethodGet, resource+"/abcd", nil, http.StatusBadRequest, jsonhttp.StatusResponse{
+			Message: "invalid root chunk",
+			Code:    http.StatusBadRequest,
 		})
 	})
 }
