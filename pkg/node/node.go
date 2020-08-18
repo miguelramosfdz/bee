@@ -242,10 +242,7 @@ func NewBee(addr string, logger logging.Logger, o Options) (*Bee, error) {
 		return nil, fmt.Errorf("pseudosettle service: %w", err)
 	}
 
-	pricing := pricing.New(pricing.Options{
-		Streamer: p2ps,
-		Logger:   logger,
-	})
+	pricing := pricing.New(p2ps, logger)
 
 	if err = p2ps.AddProtocol(pricing.Protocol()); err != nil {
 		return nil, fmt.Errorf("pricing service: %w", err)
