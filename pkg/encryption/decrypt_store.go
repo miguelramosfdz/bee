@@ -67,11 +67,7 @@ func NewEncrypting() *Encrypting {
 	return &Encrypting{}
 }
 
-func (s *Encrypting) Encrypt(b []byte) ([]byte, Key, error) {
-	return encryptChunkData(b)
-}
-
-func encryptChunkData(chunkData []byte) ([]byte, Key, error) {
+func (s *Encrypting) Encrypt(chunkData []byte) ([]byte, Key, error) {
 	if len(chunkData) < 8 {
 		return nil, nil, fmt.Errorf("invalid data, min length 8 got %v", len(chunkData))
 	}

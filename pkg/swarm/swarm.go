@@ -17,7 +17,7 @@ import (
 const (
 	SpanSize                = 8
 	SectionSize             = 32
-	Branches                = 128
+	Branches                = 64
 	ChunkSize               = SectionSize * Branches
 	HashSize                = 32
 	MaxPO             uint8 = 15

@@ -134,11 +134,11 @@ func (s *SimpleSplitterJob) sumLevel(lvl int) ([]byte, error) {
 	sizeToSum := s.cursors[lvl] - s.cursors[lvl+1]
 	var data, d, k []byte
 	var err error
-	//var c swarm.Chunk
 	if s.encrypt != nil {
 		data = s.buffer[s.cursors[lvl+1] : s.cursors[lvl+1]+sizeToSum]
 		d, k, err = s.encrypt.Encrypt(data)
 		if err != nil {
+			panic(fmt.Sprint(data, "level", lvl, "cursors", s.cursors))
 			return nil, err
 		}
 		data = d
@@ -160,7 +160,6 @@ func (s *SimpleSplitterJob) sumLevel(lvl int) ([]byte, error) {
 	}
 	ref := s.hasher.Sum(nil)
 	ref = append(ref, k...)
-	//panic(len(ref))
 
 	// assemble chunk and put in store
 	addr := swarm.NewAddress(ref)
