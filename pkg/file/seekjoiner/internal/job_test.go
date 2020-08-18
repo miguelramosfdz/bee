@@ -73,13 +73,15 @@ func TestSeek(t *testing.T) {
 				store := mock.NewStorer()
 				defer store.Close()
 
+				//encPutter := encryption.NewEncrypting()
+
 				data, err := ioutil.ReadAll(io.LimitReader(r, tc.size))
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				s := splitter.NewSimpleSplitter(store, storage.ModePutUpload)
-				addr, err := s.Split(ctx, ioutil.NopCloser(bytes.NewReader(data)), tc.size, v)
+				s := splitter.NewSimpleSplitter(store)
+				addr, err := s.Split(ctx, ioutil.NopCloser(bytes.NewReader(data)), tc.size)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash"
 
+	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -40,6 +41,7 @@ func hashFunc() hash.Hash {
 type SimpleSplitterJob struct {
 	ctx        context.Context
 	putter     storage.Putter
+	encrypt    *encryption.Encrypting
 	spanLength int64    // target length of data
 	length     int64    // number of bytes written to the data level of the hasher
 	sumCounts  []int    // number of sums performed, indexed per level
@@ -51,16 +53,18 @@ type SimpleSplitterJob struct {
 // NewSimpleSplitterJob creates a new SimpleSplitterJob.
 //
 // The spanLength is the length of the data that will be written.
-func NewSimpleSplitterJob(ctx context.Context, putter storage.Putter, spanLength int64) *SimpleSplitterJob {
+func NewSimpleSplitterJob(ctx context.Context, putter storage.Putter, encrypter *encryption.Encrypting, spanLength int64) *SimpleSplitterJob {
 	p := bmtlegacy.NewTreePool(hashFunc, swarm.Branches, bmtlegacy.PoolSize)
 	return &SimpleSplitterJob{
 		ctx:        ctx,
 		putter:     putter,
+		encrypt:    encrypter,
 		spanLength: spanLength,
 		sumCounts:  make([]int, levelBufferLimit),
 		cursors:    make([]int, levelBufferLimit),
 		hasher:     bmtlegacy.New(p),
-		buffer:     make([]byte, file.ChunkWithLengthSize*levelBufferLimit*2), // double size as temp workaround for weak calculation of needed buffer space
+
+		buffer: make([]byte, file.ChunkWithLengthSize*levelBufferLimit*2), // double size as temp workaround for weak calculation of needed buffer space
 	}
 }
 
@@ -128,18 +132,35 @@ func (s *SimpleSplitterJob) sumLevel(lvl int) ([]byte, error) {
 	span := (s.length-1)%spanSize + 1
 
 	sizeToSum := s.cursors[lvl] - s.cursors[lvl+1]
+	var data, d, k []byte
+	var err error
+	//var c swarm.Chunk
+	if s.encrypt != nil {
+		data = s.buffer[s.cursors[lvl+1] : s.cursors[lvl+1]+sizeToSum]
+		d, k, err = s.encrypt.Encrypt(data)
+		if err != nil {
+			return nil, err
+		}
+		data = d
+		span = int64(len(data))
+
+	} else {
+		data = s.buffer[s.cursors[lvl+1] : s.cursors[lvl+1]+sizeToSum]
+	}
 
 	// perform hashing
 	s.hasher.Reset()
-	err := s.hasher.SetSpan(span)
+	err = s.hasher.SetSpan(span)
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.hasher.Write(s.buffer[s.cursors[lvl+1] : s.cursors[lvl+1]+sizeToSum])
+	_, err = s.hasher.Write(data)
 	if err != nil {
 		return nil, err
 	}
 	ref := s.hasher.Sum(nil)
+	ref = append(ref, k...)
+	//panic(len(ref))
 
 	// assemble chunk and put in store
 	addr := swarm.NewAddress(ref)

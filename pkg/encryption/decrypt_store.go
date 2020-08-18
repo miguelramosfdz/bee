@@ -8,11 +8,16 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"hash"
 
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"golang.org/x/crypto/sha3"
 )
+
+func hashFunc() hash.Hash {
+	return sha3.NewLegacyKeccak256()
+}
 
 type decryptingGetter struct {
 	storage.Getter
@@ -55,16 +60,43 @@ func (s *decryptingGetter) Get(ctx context.Context, mode storage.ModeGet, addr s
 	}
 }
 
-type encryptingPutter struct {
-	storage.Putter
+type Encrypting struct {
 }
 
-func NewEncryptingPutter(s storage.Putter) storage.Putter {
-	return &encryptingPutter{s}
+func NewEncrypting() *Encrypting {
+	return &Encrypting{}
 }
 
-func (s *encryptingPutter) Put(ctx context.Context, mode ModePut, chs ...swarm.Chunk) (exist []bool, err error) {
+func (s *Encrypting) Encrypt(b []byte) ([]byte, Key, error) {
+	return encryptChunkData(b)
+}
 
+func encryptChunkData(chunkData []byte) ([]byte, Key, error) {
+	if len(chunkData) < 8 {
+		return nil, nil, fmt.Errorf("invalid data, min length 8 got %v", len(chunkData))
+	}
+
+	key, encryptedSpan, encryptedData, err := encrypt(chunkData)
+	if err != nil {
+		return nil, nil, err
+	}
+	c := make([]byte, len(encryptedSpan)+len(encryptedData))
+	copy(c[:8], encryptedSpan)
+	copy(c[8:], encryptedData)
+	return c, key, nil
+}
+
+func encrypt(chunkData []byte) (Key, []byte, []byte, error) {
+	key := GenerateRandomKey(KeyLength)
+	encryptedSpan, err := newSpanEncryption(key).Encrypt(chunkData[:8])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	encryptedData, err := newDataEncryption(key).Encrypt(chunkData[8:])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return key, encryptedSpan, encryptedData, nil
 }
 
 func decryptChunkData(chunkData []byte, encryptionKey Key) ([]byte, error) {

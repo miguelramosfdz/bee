@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/file/splitter/internal"
 	"github.com/ethersphere/bee/pkg/storage"
@@ -35,7 +36,7 @@ func NewSimpleSplitter(putter storage.Putter) file.Splitter {
 //
 // It returns the Swarmhash of the data.
 func (s *simpleSplitter) Split(ctx context.Context, r io.ReadCloser, dataLength int64) (addr swarm.Address, err error) {
-	j := internal.NewSimpleSplitterJob(ctx, s.putter, dataLength)
+	j := internal.NewSimpleSplitterJob(ctx, s.putter, encryption.NewEncrypting(), dataLength)
 
 	var total int64
 	data := make([]byte, swarm.ChunkSize)
