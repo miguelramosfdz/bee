@@ -14,6 +14,8 @@ import (
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
+var ChunkWithLengthSize = swarm.ChunkSize + 8
+
 // JoinSeeker provides a Joiner that can seek.
 type JoinSeeker interface {
 	Join(ctx context.Context, address swarm.Address) (dataOut io.ReadSeeker, dataLength int64, err error)
@@ -26,7 +28,7 @@ type JoinSeeker interface {
 // If the dataLength parameter is 0, data is read until io.EOF is encountered.
 // When EOF is received and splitting is done, the resulting Swarm Address is returned.
 type Splitter interface {
-	Split(ctx context.Context, dataIn io.ReadCloser, dataLength int64, toEncrypt bool) (addr swarm.Address, err error)
+	Split(ctx context.Context, dataIn io.ReadCloser, dataLength int64) (addr swarm.Address, err error)
 }
 
 // JoinReadAll reads all output from the provided joiner.
@@ -59,7 +61,7 @@ func JoinReadAll(ctx context.Context, j JoinSeeker, addr swarm.Address, outFile 
 }
 
 // SplitWriteAll writes all input from provided reader to the provided splitter
-func SplitWriteAll(ctx context.Context, s Splitter, r io.Reader, l int64, toEncrypt bool) (swarm.Address, error) {
+func SplitWriteAll(ctx context.Context, s Splitter, r io.Reader, l int64) (swarm.Address, error) {
 	chunkPipe := NewChunkPipe()
 	errC := make(chan error)
 	go func() {
@@ -78,7 +80,7 @@ func SplitWriteAll(ctx context.Context, s Splitter, r io.Reader, l int64, toEncr
 		close(errC)
 	}()
 
-	addr, err := s.Split(ctx, chunkPipe, l, toEncrypt)
+	addr, err := s.Split(ctx, chunkPipe, l)
 	if err != nil {
 		return swarm.ZeroAddress, err
 	}
