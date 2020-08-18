@@ -14,15 +14,15 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-type decryptingStore struct {
+type decryptingGetter struct {
 	storage.Getter
 }
 
-func NewDecryptingStore(s storage.Getter) storage.Getter {
-	return &decryptingStore{s}
+func NewDecryptingGetter(s storage.Getter) storage.Getter {
+	return &decryptingGetter{s}
 }
 
-func (s *decryptingStore) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Address) (ch swarm.Chunk, err error) {
+func (s *decryptingGetter) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Address) (ch swarm.Chunk, err error) {
 	switch l := len(addr.Bytes()); l {
 	case 32:
 		// normal, unencrypted content
@@ -53,6 +53,18 @@ func (s *decryptingStore) Get(ctx context.Context, mode storage.ModeGet, addr sw
 	default:
 		return nil, storage.ErrReferenceLength
 	}
+}
+
+type encryptingPutter struct {
+	storage.Putter
+}
+
+func NewEncryptingPutter(s storage.Putter) storage.Putter {
+	return &encryptingPutter{s}
+}
+
+func (s *encryptingPutter) Put(ctx context.Context, mode ModePut, chs ...swarm.Chunk) (exist []bool, err error) {
+
 }
 
 func decryptChunkData(chunkData []byte, encryptionKey Key) ([]byte, error) {

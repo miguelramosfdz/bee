@@ -16,27 +16,15 @@ import (
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
-type putWrapper struct {
-	putter func(context.Context, swarm.Chunk) ([]bool, error)
-}
-
-func (p putWrapper) Put(ctx context.Context, ch swarm.Chunk) ([]bool, error) {
-	return p.putter(ctx, ch)
-}
-
 // simpleSplitter wraps a non-optimized implementation of file.Splitter
 type simpleSplitter struct {
-	putter internal.Putter
+	putter storage.Putter
 }
 
 // NewSimpleSplitter creates a new SimpleSplitter
-func NewSimpleSplitter(storePutter storage.Putter, mode storage.ModePut) file.Splitter {
+func NewSimpleSplitter(putter storage.Putter) file.Splitter {
 	return &simpleSplitter{
-		putter: putWrapper{
-			putter: func(ctx context.Context, ch swarm.Chunk) ([]bool, error) {
-				return storePutter.Put(ctx, mode, ch)
-			},
-		},
+		putter: putter,
 	}
 }
 
@@ -46,8 +34,9 @@ func NewSimpleSplitter(storePutter storage.Putter, mode storage.ModePut) file.Sp
 // multiple levels of hashing when building the file hash tree.
 //
 // It returns the Swarmhash of the data.
-func (s *simpleSplitter) Split(ctx context.Context, r io.ReadCloser, dataLength int64, toEncrypt bool) (addr swarm.Address, err error) {
-	j := internal.NewSimpleSplitterJob(ctx, s.putter, dataLength, toEncrypt)
+func (s *simpleSplitter) Split(ctx context.Context, r io.ReadCloser, dataLength int64) (addr swarm.Address, err error) {
+	j := internal.NewSimpleSplitterJob(ctx, s.putter, dataLength)
+
 	var total int64
 	data := make([]byte, swarm.ChunkSize)
 	var eof bool
@@ -60,7 +49,6 @@ func (s *simpleSplitter) Split(ctx context.Context, r io.ReadCloser, dataLength 
 					return swarm.ZeroAddress, fmt.Errorf("splitter only received %d bytes of data, expected %d bytes", total+int64(c), dataLength)
 				}
 				eof = true
-				continue
 			} else {
 				return swarm.ZeroAddress, err
 			}
@@ -75,6 +63,5 @@ func (s *simpleSplitter) Split(ctx context.Context, r io.ReadCloser, dataLength 
 	}
 
 	sum := j.Sum(nil)
-	newAddress := swarm.NewAddress(sum)
-	return newAddress, nil
+	return swarm.NewAddress(sum), nil
 }

@@ -23,10 +23,10 @@ import (
 func TestSplitIncomplete(t *testing.T) {
 	testData := make([]byte, 42)
 	store := mock.NewStorer()
-	s := splitter.NewSimpleSplitter(store, storage.ModePutUpload)
+	s := splitter.NewSimpleSplitter(store)
 
 	testDataReader := file.NewSimpleReadCloser(testData)
-	_, err := s.Split(context.Background(), testDataReader, 41, false)
+	_, err := s.Split(context.Background(), testDataReader, 41)
 	if err == nil {
 		t.Fatalf("expected error on EOF before full length write")
 	}
@@ -42,10 +42,10 @@ func TestSplitSingleChunk(t *testing.T) {
 	}
 
 	store := mock.NewStorer()
-	s := splitter.NewSimpleSplitter(store, storage.ModePutUpload)
+	s := splitter.NewSimpleSplitter(store)
 
 	testDataReader := file.NewSimpleReadCloser(testData)
-	resultAddress, err := s.Split(context.Background(), testDataReader, int64(len(testData)), false)
+	resultAddress, err := s.Split(context.Background(), testDataReader, int64(len(testData)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,16 +68,16 @@ func TestSplitSingleChunk(t *testing.T) {
 func TestSplitThreeLevels(t *testing.T) {
 	// edge case selected from internal/job_test.go
 	g := mockbytes.New(0, mockbytes.MockTypeStandard).WithModulus(255)
-	testData, err := g.SequentialBytes(swarm.ChunkSize * 128)
+	testData, err := g.SequentialBytes(swarm.ChunkSize * swarm.Branches)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	store := mock.NewStorer()
-	s := splitter.NewSimpleSplitter(store, storage.ModePutUpload)
+	s := splitter.NewSimpleSplitter(store)
 
 	testDataReader := file.NewSimpleReadCloser(testData)
-	resultAddress, err := s.Split(context.Background(), testDataReader, int64(len(testData)), false)
+	resultAddress, err := s.Split(context.Background(), testDataReader, int64(len(testData)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,12 +131,12 @@ func TestUnalignedSplit(t *testing.T) {
 	}
 
 	// perform the split in a separate thread
-	sp := splitter.NewSimpleSplitter(storer, storage.ModePutUpload)
+	sp := splitter.NewSimpleSplitter(storer)
 	ctx := context.Background()
 	doneC := make(chan swarm.Address)
 	errC := make(chan error)
 	go func() {
-		addr, err := sp.Split(ctx, chunkPipe, dataLen, false)
+		addr, err := sp.Split(ctx, chunkPipe, dataLen)
 		if err != nil {
 			errC <- err
 		} else {
@@ -180,4 +180,5 @@ func TestUnalignedSplit(t *testing.T) {
 	case <-timer.C:
 		t.Fatal("timeout")
 	}
+
 }
