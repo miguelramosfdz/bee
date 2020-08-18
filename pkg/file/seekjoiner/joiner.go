@@ -26,7 +26,7 @@ type simpleJoiner struct {
 // NewSimpleJoiner creates a new simpleJoiner.
 func NewSimpleJoiner(getter storage.Getter) file.JoinSeeker {
 	return &simpleJoiner{
-		getter: encryption.NewDecryptingStore(getter),
+		getter: encryption.NewDecryptingGetter(getter),
 	}
 }
 

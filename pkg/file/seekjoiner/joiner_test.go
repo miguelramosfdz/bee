@@ -79,7 +79,7 @@ func TestJoinerSingleChunk(t *testing.T) {
 // the decrypting store manages to retrieve a normal chunk which is not encrypted
 func TestJoinerDecryptingStore_NormalChunk(t *testing.T) {
 	st := mock.NewStorer()
-	store := encryption.NewDecryptingStore(st)
+	store := encryption.NewDecryptingGetter(st)
 	joiner := joiner.NewSimpleJoiner(store)
 
 	ctx, cancel := context.WithCancel(context.Background())

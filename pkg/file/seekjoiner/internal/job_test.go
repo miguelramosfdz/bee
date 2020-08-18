@@ -83,7 +83,7 @@ func TestSeek(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				getter := encryption.NewDecryptingStore(store)
+				getter := encryption.NewDecryptingGetter(store)
 				rootChunk, err := getter.Get(ctx, storage.ModeGetLookup, addr)
 				if err != nil {
 					t.Fatal(err)
