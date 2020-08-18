@@ -13,17 +13,12 @@ import (
 
 	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file"
-	"github.com/ethersphere/bee/pkg/sctx"
+	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/tags"
 	"github.com/ethersphere/bmt"
 	bmtlegacy "github.com/ethersphere/bmt/legacy"
 	"golang.org/x/crypto/sha3"
 )
-
-type Putter interface {
-	Put(context.Context, swarm.Chunk) ([]bool, error)
-}
 
 // maximum amount of file tree levels this file hasher component can handle
 // (128 ^ (9 - 1)) * 4096 = 295147905179352825856 bytes
@@ -45,29 +40,27 @@ func hashFunc() hash.Hash {
 // error and will may result in undefined result.
 type SimpleSplitterJob struct {
 	ctx        context.Context
-	putter     Putter
+	putter     storage.Putter
 	spanLength int64    // target length of data
 	length     int64    // number of bytes written to the data level of the hasher
 	sumCounts  []int    // number of sums performed, indexed per level
 	cursors    []int    // section write position, indexed per level
 	hasher     bmt.Hash // underlying hasher used for hashing the tree
 	buffer     []byte   // keeps data and hashes, indexed by cursors
-	tag        *tags.Tag
-	toEncrypt  bool // to encryrpt the chunks or not
+	toEncrypt  bool     // to encryrpt the chunks or not
 	refSize    int64
 }
 
 // NewSimpleSplitterJob creates a new SimpleSplitterJob.
 //
 // The spanLength is the length of the data that will be written.
-func NewSimpleSplitterJob(ctx context.Context, putter Putter, spanLength int64, toEncrypt bool) *SimpleSplitterJob {
+func NewSimpleSplitterJob(ctx context.Context, putter storage.Putter, spanLength int64, toEncrypt bool) *SimpleSplitterJob {
 	hashSize := swarm.HashSize
 	refSize := int64(hashSize)
 	if toEncrypt {
 		refSize += encryption.KeyLength
 	}
 	p := bmtlegacy.NewTreePool(hashFunc, swarm.Branches, bmtlegacy.PoolSize)
-
 	return &SimpleSplitterJob{
 		ctx:        ctx,
 		putter:     putter,
@@ -76,7 +69,6 @@ func NewSimpleSplitterJob(ctx context.Context, putter Putter, spanLength int64, 
 		cursors:    make([]int, levelBufferLimit),
 		hasher:     bmtlegacy.New(p),
 		buffer:     make([]byte, swarm.ChunkWithSpanSize*levelBufferLimit*2), // double size as temp workaround for weak calculation of needed buffer space
-		tag:        sctx.GetTag(ctx),
 		toEncrypt:  toEncrypt,
 		refSize:    refSize,
 	}
@@ -144,54 +136,46 @@ func (s *SimpleSplitterJob) sumLevel(lvl int) ([]byte, error) {
 	s.sumCounts[lvl]++
 	spanSize := file.Spans[lvl] * swarm.ChunkSize
 	span := (s.length-1)%spanSize + 1
+	sizeToSum := s.cursors[lvl] - s.cursors[lvl+1]
 
+	//perform hashing
+	s.hasher.Reset()
+	err := s.hasher.SetSpan(span)
+	if err != nil {
+		return nil, err
+	}
+
+	var ref encryption.Key
 	var chunkData []byte
-	var addr swarm.Address
+	data := s.buffer[s.cursors[lvl+1] : s.cursors[lvl+1]+sizeToSum]
 
+	_, err = s.hasher.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	ref = s.hasher.Sum(nil)
 	head := make([]byte, 8)
 	binary.LittleEndian.PutUint64(head, uint64(span))
 	tail := s.buffer[s.cursors[lvl+1]:s.cursors[lvl]]
 	chunkData = append(head, tail...)
-	s.incrTag(tags.StateSplit)
+
+	// assemble chunk and put in store
+	addr := swarm.NewAddress(ref)
+
 	c := chunkData
 	var encryptionKey encryption.Key
-
 	if s.toEncrypt {
-		var err error
 		c, encryptionKey, err = s.encryptChunkData(chunkData)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	s.hasher.Reset()
-	err := s.hasher.SetSpanBytes(c[:8])
+	ch := swarm.NewChunk(addr, c)
+	_, err = s.putter.Put(s.ctx, storage.ModePutUpload, ch)
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.hasher.Write(c[8:])
-	if err != nil {
-		return nil, err
-	}
-	ref := s.hasher.Sum(nil)
-	addr = swarm.NewAddress(ref)
-
-	// Add tag to the chunk if tag is valid
-	var ch swarm.Chunk
-	if s.tag != nil {
-		ch = swarm.NewChunk(addr, c).WithTagID(s.tag.Uid)
-	} else {
-		ch = swarm.NewChunk(addr, c)
-	}
-
-	seen, err := s.putter.Put(s.ctx, ch)
-	if err != nil {
-		return nil, err
-	} else if len(seen) > 0 && seen[0] {
-		s.incrTag(tags.StateSeen)
-	}
-
-	s.incrTag(tags.StateStored)
 
 	return append(ch.Address().Bytes(), encryptionKey...), nil
 }
@@ -308,10 +292,4 @@ func (s *SimpleSplitterJob) newSpanEncryption(key encryption.Key) *encryption.En
 
 func (s *SimpleSplitterJob) newDataEncryption(key encryption.Key) *encryption.Encryption {
 	return encryption.New(key, int(swarm.ChunkSize), 0, sha3.NewLegacyKeccak256)
-}
-
-func (s *SimpleSplitterJob) incrTag(state tags.State) {
-	if s.tag != nil {
-		s.tag.Inc(state)
-	}
 }

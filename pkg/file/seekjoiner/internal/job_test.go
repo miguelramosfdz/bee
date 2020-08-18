@@ -7,12 +7,14 @@ package internal_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
 	mrand "math/rand"
 	"testing"
 	"time"
 
+	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file/seekjoiner/internal"
 	"github.com/ethersphere/bee/pkg/file/splitter"
 	filetest "github.com/ethersphere/bee/pkg/file/testing"
@@ -30,150 +32,154 @@ func TestSeek(t *testing.T) {
 		name string
 		size int64
 	}{
-		{
-			name: "one byte",
-			size: 1,
-		},
-		{
-			name: "a few bytes",
-			size: 10,
-		},
-		{
-			name: "a few bytes more",
-			size: 65,
-		},
-		{
-			name: "almost a chunk",
-			size: 4095,
-		},
-		{
-			name: "one chunk",
-			size: swarm.ChunkSize,
-		},
-		{
-			name: "a few chunks",
-			size: 10 * swarm.ChunkSize,
-		},
-		{
-			name: "a few chunks and a change",
-			size: 10*swarm.ChunkSize + 84,
-		},
+		//{
+		//name: "one byte",
+		//size: 1,
+		//},
+		//{
+		//name: "a few bytes",
+		//size: 10,
+		//},
+		//{
+		//name: "a few bytes more",
+		//size: 65,
+		//},
+		//{
+		//name: "almost a chunk",
+		//size: 4095,
+		//},
+		//{
+		//name: "one chunk",
+		//size: swarm.ChunkSize,
+		//},
+		//{
+		//name: "a few chunks",
+		//size: 10 * swarm.ChunkSize,
+		//},
+		//{
+		//name: "a few chunks and a change",
+		//size: 10*swarm.ChunkSize + 84,
+		//},
 		{
 			name: "a few chunks more",
 			size: 2*swarm.ChunkSize*swarm.ChunkSize + 1000,
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+		fmt.Println(tc.size)
+		for _, v := range []bool{true} {
+			t.Run(fmt.Sprintf("%s_encryption_%t", tc.name, v), func(t *testing.T) {
+				ctx := context.Background()
 
-			store := mock.NewStorer()
-			defer store.Close()
+				store := mock.NewStorer()
+				defer store.Close()
 
-			data, err := ioutil.ReadAll(io.LimitReader(r, tc.size))
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			s := splitter.NewSimpleSplitter(store, storage.ModePutUpload)
-			addr, err := s.Split(ctx, ioutil.NopCloser(bytes.NewReader(data)), tc.size, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rootChunk, err := store.Get(ctx, storage.ModeGetLookup, addr)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			j := internal.NewSimpleJoinerJob(ctx, store, len(addr.Bytes()), rootChunk)
-
-			validateRead := func(t *testing.T, name string, i int) {
-				t.Helper()
-
-				got := make([]byte, swarm.ChunkSize)
-				count, err := j.Read(got)
+				data, err := ioutil.ReadAll(io.LimitReader(r, tc.size))
 				if err != nil {
 					t.Fatal(err)
 				}
-				if count == 0 {
-					t.Errorf("read with seek from %s to %v: got count 0", name, i)
-				}
-				got = got[:count]
-				want := data[i : i+count]
-				if !bytes.Equal(got, want) {
-					t.Errorf("read on seek to %v from %v: got data %x, want %s", name, i, got, want)
-				}
-			}
 
-			// seek to 10 random locations
-			for i := int64(0); i < 10 && i < tc.size; i++ {
-				exp := mrand.Int63n(tc.size)
-				n, err := j.Seek(exp, io.SeekStart)
+				s := splitter.NewSimpleSplitter(store, storage.ModePutUpload)
+				addr, err := s.Split(ctx, ioutil.NopCloser(bytes.NewReader(data)), tc.size, v)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if n != exp {
-					t.Errorf("seek to %v from start, want %v", n, exp)
-				}
-
-				validateRead(t, "start", int(n))
-			}
-			if _, err := j.Seek(0, io.SeekStart); err != nil {
-				t.Fatal(err)
-			}
-
-			// seek to all possible locations from current position
-			for i := int64(1); i < 10 && i < tc.size; i++ {
-				exp := mrand.Int63n(tc.size)
-				n, err := j.Seek(exp, io.SeekCurrent)
+				getter := encryption.NewDecryptingStore(store)
+				rootChunk, err := getter.Get(ctx, storage.ModeGetLookup, addr)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if n != exp {
-					t.Errorf("seek to %v from current, want %v", n, exp)
+
+				j := internal.NewSimpleJoinerJob(ctx, getter, len(addr.Bytes()), rootChunk)
+
+				validateRead := func(t *testing.T, name string, i int) {
+					t.Helper()
+
+					got := make([]byte, swarm.ChunkSize)
+					count, err := j.Read(got)
+					if err != nil {
+						t.Fatalf("error on read. seek to %d, test %s: %v", i, name, err)
+					}
+					if count == 0 {
+						t.Errorf("read with seek from %s to %v: got count 0", name, i)
+					}
+					got = got[:count]
+					want := data[i : i+count]
+					if !bytes.Equal(got, want) {
+						t.Errorf("read on seek to %v from %v: got data %x, want %s", name, i, got, want)
+					}
 				}
 
-				validateRead(t, "current", int(n))
+				// seek to 10 random locations
+				for i := int64(0); i < 10 && i < tc.size; i++ {
+					exp := mrand.Int63n(tc.size)
+					n, err := j.Seek(exp, io.SeekStart)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if n != exp {
+						t.Errorf("seek to %v from start, want %v", n, exp)
+					}
+
+					validateRead(t, fmt.Sprintf("start_%d", tc.size), int(n))
+				}
 				if _, err := j.Seek(0, io.SeekStart); err != nil {
 					t.Fatal(err)
 				}
 
-			}
-			if _, err := j.Seek(0, io.SeekStart); err != nil {
-				t.Fatal(err)
-			}
+				// seek to all possible locations from current position
+				for i := int64(1); i < 10 && i < tc.size; i++ {
+					exp := mrand.Int63n(tc.size)
+					n, err := j.Seek(exp, io.SeekCurrent)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if n != exp {
+						t.Errorf("seek to %v from current, want %v", n, exp)
+					}
 
-			// seek to 10 random locations from end
-			for i := int64(1); i < 10; i++ {
-				exp := mrand.Int63n(tc.size)
-				if exp == 0 {
-					exp = 1
-				}
-				n, err := j.Seek(exp, io.SeekEnd)
-				if err != nil {
-					t.Fatalf("seek from end, exp %d size %d error: %v", exp, tc.size, err)
-				}
-				want := tc.size - exp
-				if n != want {
-					t.Errorf("seek to %v from end, want %v, size %v, exp %v", n, want, tc.size, exp)
-				}
+					validateRead(t, "current", int(n))
+					if _, err := j.Seek(0, io.SeekStart); err != nil {
+						t.Fatal(err)
+					}
 
-				validateRead(t, "end", int(n))
-			}
-			if _, err := j.Seek(0, io.SeekStart); err != nil {
-				t.Fatal(err)
-			}
-			// seek overflow for a few bytes
-			for i := int64(1); i < 5; i++ {
-				n, err := j.Seek(tc.size+i, io.SeekStart)
-				if err != io.EOF {
-					t.Errorf("seek overflow to %v: got error %v, want %v", i, err, io.EOF)
+				}
+				if _, err := j.Seek(0, io.SeekStart); err != nil {
+					t.Fatal(err)
 				}
 
-				if n != 0 {
-					t.Errorf("seek overflow to %v: got %v, want 0", i, n)
+				// seek to 10 random locations from end
+				for i := int64(1); i < 10; i++ {
+					exp := mrand.Int63n(tc.size)
+					if exp == 0 {
+						exp = 1
+					}
+					n, err := j.Seek(exp, io.SeekEnd)
+					if err != nil {
+						t.Fatalf("seek from end, exp %d size %d error: %v", exp, tc.size, err)
+					}
+					want := tc.size - exp
+					if n != want {
+						t.Errorf("seek to %v from end, want %v, size %v, exp %v", n, want, tc.size, exp)
+					}
+
+					validateRead(t, "end", int(n))
 				}
-			}
-		})
+				if _, err := j.Seek(0, io.SeekStart); err != nil {
+					t.Fatal(err)
+				}
+				// seek overflow for a few bytes
+				for i := int64(1); i < 5; i++ {
+					n, err := j.Seek(tc.size+i, io.SeekStart)
+					if err != io.EOF {
+						t.Errorf("seek overflow to %v: got error %v, want %v", i, err, io.EOF)
+					}
+
+					if n != 0 {
+						t.Errorf("seek overflow to %v: got %v, want 0", i, n)
+					}
+				}
+			})
+		}
 	}
 }
 

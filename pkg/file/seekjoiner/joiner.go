@@ -61,6 +61,6 @@ func (s *simpleJoiner) Join(ctx context.Context, address swarm.Address) (dataOut
 
 	// if this is a single chunk, short circuit to returning just that chunk
 	spanLength := binary.LittleEndian.Uint64(chunkData[:8])
-	r := internal.NewSimpleJoinerJob(ctx, s.getter, len(address.Bytes()), rootChunk)
+	r := internal.NewSimpleJoinerJob(ctx, s.getter, len(address.Bytes()), spanLength, rootChunk)
 	return r, int64(spanLength), nil
 }

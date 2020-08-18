@@ -26,10 +26,12 @@ func (s *decryptingStore) Get(ctx context.Context, mode storage.ModeGet, addr sw
 	switch l := len(addr.Bytes()); l {
 	case 32:
 		// normal, unencrypted content
+		fmt.Println("short ref")
 		return s.Getter.Get(ctx, mode, addr)
 
 	case 64:
 		// encrypted reference
+		fmt.Println("long ref")
 		ref := addr.Bytes()
 		address := swarm.NewAddress(ref[:32])
 		ch, err := s.Getter.Get(ctx, mode, address)
@@ -39,6 +41,9 @@ func (s *decryptingStore) Get(ctx context.Context, mode storage.ModeGet, addr sw
 
 		decryptionKey := make([]byte, KeyLength)
 		copy(decryptionKey, ref[32:])
+		if len(ref[32:]) != 32 {
+			panic(1)
+		}
 		d, err := decryptChunkData(ch.Data(), decryptionKey)
 		if err != nil {
 			return nil, err
@@ -72,6 +77,7 @@ func decryptChunkData(chunkData []byte, encryptionKey Key) ([]byte, error) {
 	c := make([]byte, length+8)
 	copy(c[:8], decryptedSpan)
 	copy(c[8:], decryptedData[:length])
+	fmt.Println("decrypted span", binary.LittleEndian.Uint64(decryptedSpan))
 
 	return c, nil
 }

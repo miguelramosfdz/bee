@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/ethersphere/bee/pkg/file"
@@ -31,6 +32,7 @@ type SimpleJoinerJob struct {
 func NewSimpleJoinerJob(ctx context.Context, getter storage.Getter, refLength int, rootChunk swarm.Chunk) *SimpleJoinerJob {
 	// spanLength is the overall  size of the entire data layer for this content addressed hash
 	spanLength := binary.LittleEndian.Uint64(rootChunk.Data()[:8])
+	fmt.Println(spanLength)
 	levelCount := file.Levels(int64(spanLength), swarm.SectionSize, swarm.Branches)
 	j := &SimpleJoinerJob{
 		addr:       rootChunk.Address(),
@@ -48,6 +50,7 @@ func NewSimpleJoinerJob(ctx context.Context, getter storage.Getter, refLength in
 // Read is called by the consumer to retrieve the joined data.
 // It must be called with a buffer equal to the maximum chunk size.
 func (j *SimpleJoinerJob) Read(b []byte) (n int, err error) {
+	fmt.Println("readat", j.off)
 	read, err := j.ReadAt(b, j.off)
 	if err != nil && err != io.EOF {
 		return read, err
@@ -99,6 +102,7 @@ func (j *SimpleJoinerJob) readAtOffset(b, data []byte, cur, subTrieSize, off int
 		}
 		cur += subtrieSpan
 	}
+	panic(000)
 
 	return 0, errOffset
 }
@@ -107,6 +111,7 @@ var errWhence = errors.New("seek: invalid whence")
 var errOffset = errors.New("seek: invalid offset")
 
 func (j *SimpleJoinerJob) Seek(offset int64, whence int) (int64, error) {
+	fmt.Println("seek", "offset", offset, "j.off", j.off)
 	switch whence {
 	case 0:
 		offset += 0
@@ -116,6 +121,7 @@ func (j *SimpleJoinerJob) Seek(offset int64, whence int) (int64, error) {
 
 		offset = j.spanLength - offset
 		if offset < 0 {
+			panic(11)
 			return 0, io.EOF
 		}
 	default:
@@ -123,9 +129,11 @@ func (j *SimpleJoinerJob) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	if offset < 0 {
+		panic(offset)
 		return 0, errOffset
 	}
 	if offset > j.spanLength {
+		fmt.Println("eee", offset, "spanLength", j.spanLength)
 		return 0, io.EOF
 	}
 	j.off = offset
